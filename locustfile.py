@@ -22,5 +22,9 @@ class BouncerUser(HttpUser):
         self.client.get("/stats", name="/stats")
 
     @task(1)
-    def trigger_advisor(self):
-        self.client.post("/admin/adjust", name="/admin/adjust")
+    def advisor_recommend(self):
+        self.client.get("/advisor", name="/advisor")
+
+    @task(1)
+    def advisor_apply(self):
+        self.client.post("/advisor/apply", name="/advisor/apply")
