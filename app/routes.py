@@ -70,10 +70,17 @@ async def get_stats(limiter: SlidingWindowLimiter = Depends(get_limiter)):
     return await limiter.get_stats()
 
 
-@router.post("/admin/adjust")
-async def adjust_threshold(limiter: SlidingWindowLimiter = Depends(get_limiter)):
+@router.get("/advisor")
+async def advisor_recommend(limiter: SlidingWindowLimiter = Depends(get_limiter)):
+    stats = await limiter.get_stats()
+    result = advisor.analyze(stats)
+    return {**result, "stats_snapshot": stats}
+
+
+@router.post("/advisor/apply")
+async def advisor_apply(limiter: SlidingWindowLimiter = Depends(get_limiter)):
     stats = await limiter.get_stats()
     result = advisor.analyze(stats)
     for tier, new_limit in result["adjustments"].items():
         await limiter.set_limit(tier, new_limit)
-    return {**result, "stats_snapshot": stats}
+    return {**result, "applied": list(result["adjustments"].keys()), "stats_snapshot": stats}
