@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+redis>=4.2
+anthropic
+python-dotenv
+locust
