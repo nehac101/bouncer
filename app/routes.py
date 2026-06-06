@@ -6,11 +6,11 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.advisor import MockAdvisor
+from app.advisor import make_advisor
 from app.limiter import SlidingWindowLimiter
 
 router = APIRouter()
-advisor = MockAdvisor()
+advisor = make_advisor()
 
 
 async def get_limiter() -> SlidingWindowLimiter:
@@ -73,14 +73,14 @@ async def get_stats(limiter: SlidingWindowLimiter = Depends(get_limiter)):
 @router.get("/advisor")
 async def advisor_recommend(limiter: SlidingWindowLimiter = Depends(get_limiter)):
     stats = await limiter.get_stats()
-    result = advisor.analyze(stats)
+    result = await advisor.analyze(stats)
     return {**result, "stats_snapshot": stats}
 
 
 @router.post("/advisor/apply")
 async def advisor_apply(limiter: SlidingWindowLimiter = Depends(get_limiter)):
     stats = await limiter.get_stats()
-    result = advisor.analyze(stats)
+    result = await advisor.analyze(stats)
     for tier, new_limit in result["adjustments"].items():
         await limiter.set_limit(tier, new_limit)
     return {**result, "applied": list(result["adjustments"].keys()), "stats_snapshot": stats}

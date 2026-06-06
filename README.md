@@ -6,7 +6,7 @@ A Redis-backed rate limiting service where an AI advisor dynamically adjusts thr
 
 Every request is checked against a sliding window counter stored in Redis. The window is the last 60 seconds — not a fixed clock minute — so limits are enforced continuously. All counter operations run inside a Lua script for atomicity.
 
-Every 30 seconds a background advisor reads the current block rate and adjusts per-tier limits up or down automatically. The advisor is mocked today; it is designed to be swapped for a Claude API call with no changes to the rest of the app.
+Every 30 seconds a background advisor reads the current block rate and asks Claude (Opus 4.8) to recommend per-tier limit adjustments. Claude returns a JSON decision that the advisor applies immediately — no restart needed.
 
 ## Endpoints
 
@@ -89,6 +89,6 @@ pip install -e ./bouncer-ratelimit
 | `ANTHROPIC_API_KEY` | — | Required when swapping in real Claude |
 | `ADVISOR_INTERVAL` | `30` | Seconds between advisor runs |
 
-## Swapping in Claude
+## Claude Integration
 
-Replace `MockAdvisor.analyze()` in `app/advisor.py` with a Claude API call. Pass `stats` as context and parse the recommended adjustments from the response. No other files need to change.
+`app/advisor.py` contains `ClaudeAdvisor`, which calls Claude Opus 4.8 with the current traffic stats and parses the JSON recommendation. The advisor runs on a background loop every 30 seconds and also responds instantly to `GET /advisor` and `POST /advisor/apply`.
