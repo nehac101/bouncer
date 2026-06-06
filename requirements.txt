@@ -1,3 +1,4 @@
+-e ./bouncer-ratelimit
 fastapi
 uvicorn[standard]
 redis>=4.2
