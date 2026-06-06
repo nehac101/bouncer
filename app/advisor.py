@@ -1,43 +1,55 @@
-from app.limiter import MIN_THRESHOLD, MAX_THRESHOLD
+from app.limiter import DEFAULT_TIER_LIMITS
 
 # Mocked advisor — mimics what Claude would do:
-# read traffic stats, reason about patterns, recommend a threshold change.
+# read traffic stats, reason about patterns, recommend per-tier limit changes.
+
+_MIN: dict[str, int] = {"free": 2, "pro": 10, "enterprise": 50}
+_MAX: dict[str, int] = {"free": 20, "pro": 100, "enterprise": 500}
 
 
 class MockAdvisor:
     def analyze(self, stats: dict) -> dict:
-        threshold = stats["threshold"]
         block_rate = stats["block_rate"]
         total = stats["total"]
+        tier_limits = stats["tier_limits"]
 
         if total < 10:
             return {
                 "recommendation": "hold",
-                "new_threshold": threshold,
+                "adjustments": {},
                 "reason": "Insufficient traffic data to make a decision.",
             }
 
+        adjustments: dict[str, int] = {}
+
+        for tier, current in tier_limits.items():
+            if block_rate > 0.30:
+                new = min(int(current * 1.5), _MAX[tier])
+                if new != current:
+                    adjustments[tier] = new
+            elif block_rate < 0.05:
+                new = max(int(current * 0.85), _MIN[tier])
+                if new != current:
+                    adjustments[tier] = new
+
         if block_rate > 0.30:
-            new_threshold = min(int(threshold * 1.5), MAX_THRESHOLD)
             reason = (
-                f"Block rate is {block_rate:.0%} — too many legitimate requests are "
-                f"being rejected. Raising threshold from {threshold} to {new_threshold}."
+                f"Block rate is {block_rate:.0%} — too many requests rejected. "
+                "Raising limits across tiers."
             )
         elif block_rate < 0.05:
-            new_threshold = max(int(threshold * 0.85), MIN_THRESHOLD)
             reason = (
-                f"Block rate is only {block_rate:.0%} — system has headroom. "
-                f"Tightening threshold from {threshold} to {new_threshold}."
+                f"Block rate is only {block_rate:.0%} — headroom available. "
+                "Tightening limits across tiers."
             )
         else:
-            new_threshold = threshold
             reason = (
                 f"Block rate is {block_rate:.0%} — within acceptable range. "
                 "No adjustment needed."
             )
 
         return {
-            "recommendation": "adjust" if new_threshold != threshold else "hold",
-            "new_threshold": new_threshold,
+            "recommendation": "adjust" if adjustments else "hold",
+            "adjustments": adjustments,
             "reason": reason,
         }
