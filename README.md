@@ -20,6 +20,8 @@ Every 30 seconds a background advisor reads the current block rate and asks Clau
 
 ## Running locally
 
+**Backend**
+
 ```bash
 # Install dependencies
 pip install -r requirements.txt
@@ -27,9 +29,19 @@ pip install -r requirements.txt
 # Start Redis
 brew services start redis
 
-# Start the app
+# Start the API
 python main.py
 ```
+
+**Frontend**
+
+```bash
+cd bouncer-ui
+npm install
+npm run dev
+```
+
+Opens at `http://localhost:5173`. The UI polls `/stats` every 2 seconds and reflects live tier traffic and limits.
 
 ## Usage
 
@@ -86,8 +98,10 @@ pip install -e ./bouncer-ratelimit
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `REDIS_URL` | `redis://localhost:6379` | Redis connection URL |
-| `ANTHROPIC_API_KEY` | — | Required when swapping in real Claude |
+| `ANTHROPIC_API_KEY` | — | Required for Claude advisor |
 | `ADVISOR_INTERVAL` | `30` | Seconds between advisor runs |
+| `ADVISOR_BACKEND` | `claude` | Set to `mock` to skip the Claude API |
+| `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated allowed frontend origins |
 
 ## Claude Integration
 
