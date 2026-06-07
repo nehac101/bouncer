@@ -63,7 +63,12 @@ class SlidingWindowLimiter:
         )
         allowed, count, effective_limit = bool(result[0]), int(result[1]), int(result[2])
 
-        await self.redis.incr("stats:allowed" if allowed else "stats:blocked")
+        if allowed:
+            await self.redis.incr("stats:allowed")
+            await self.redis.incr(f"stats:allowed:{tier}")
+        else:
+            await self.redis.incr("stats:blocked")
+            await self.redis.incr(f"stats:blocked:{tier}")
         return allowed, count, effective_limit
 
     async def get_stats(self) -> dict:
@@ -75,6 +80,18 @@ class SlidingWindowLimiter:
         for tier in DEFAULT_TIER_LIMITS:
             tier_limits[tier] = await self._get_limit(tier)
 
+        tier_stats = {}
+        for t in DEFAULT_TIER_LIMITS:
+            t_allowed = int(await self.redis.get(f"stats:allowed:{t}") or 0)
+            t_blocked = int(await self.redis.get(f"stats:blocked:{t}") or 0)
+            t_total = t_allowed + t_blocked
+            tier_stats[t] = {
+                "allowed": t_allowed,
+                "blocked": t_blocked,
+                "total": t_total,
+                "block_rate": round(t_blocked / t_total, 3) if t_total > 0 else 0.0,
+            }
+
         return {
             "allowed": allowed,
             "blocked": blocked,
@@ -82,6 +99,7 @@ class SlidingWindowLimiter:
             "block_rate": round(blocked / total, 3) if total > 0 else 0.0,
             "window_seconds": WINDOW_MS // 1000,
             "tier_limits": tier_limits,
+            "tier_stats": tier_stats,
         }
 
     async def reset_stats(self) -> None:

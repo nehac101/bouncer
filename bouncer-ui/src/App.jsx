@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 const TIERS = {
-  free:       { label: "free",       limit: 10,   color: "#F4A460", tagColor: "#E8922A" },
-  pro:        { label: "pro",        limit: 100,  color: "#DA8FDB", tagColor: "#B85EC0" },
-  enterprise: { label: "enterprise", limit: 1000, color: "#E8837A", tagColor: "#C9493E" },
+  free:       { label: "free",       limit: 5,   color: "#F4A460", tagColor: "#E8922A" },
+  pro:        { label: "pro",        limit: 30,  color: "#DA8FDB", tagColor: "#B85EC0" },
+  enterprise: { label: "enterprise", limit: 100, color: "#E8837A", tagColor: "#C9493E" },
 };
 
 const PSEUDOCODE = `function checkRateLimit(clientId, tier) {
@@ -41,10 +41,10 @@ const BUCKET_W = 220;
 const BUCKET_H = 260;
 const BUCKET_TOP_INSET = 15;
 
-function Bucket({ tier, count, blobs, onReset }) {
+function Bucket({ tier, count, limit, blockRate, blobs, onReset }) {
   const cfg = TIERS[tier];
-  const fillPct = Math.min(count / cfg.limit, 1.12);
-  const isOverflow = count >= cfg.limit;
+  const fillPct = Math.min(count / limit, 1.12);
+  const isOverflow = blockRate > 0.1;
   const waterH = fillPct * (BUCKET_H - 20);
   const waterY = BUCKET_H - waterH;
   const waterColor = isOverflow ? "#1a6db5" : "#60A5FA";
@@ -145,7 +145,7 @@ function Bucket({ tier, count, blobs, onReset }) {
         letterSpacing: "0.05em",
         transition: "color 0.4s ease",
       }}>
-        {count} <span style={{ color: "#bbb", fontWeight: 400, marginLeft: 4 }}>/ {cfg.limit}</span>
+        {count} <span style={{ color: "#bbb", fontWeight: 400, marginLeft: 4 }}>/ {limit}</span>
       </div>
 
       {/* Rate limited badge — fixed height slot so layout never shifts */}
@@ -238,15 +238,43 @@ function CodePanel({ visible, activeLine, onClose }) {
   );
 }
 
+const API = "http://localhost:8000";
+
 export default function Bouncer() {
-  const [counts, setCounts] = useState({ free: 0, pro: 0, enterprise: 0 });
-  const [blobs, setBlobs]   = useState({ free: [], pro: [], enterprise: [] });
+  const [counts, setCounts]         = useState({ free: 0, pro: 0, enterprise: 0 });
+  const [blobs, setBlobs]           = useState({ free: [], pro: [], enterprise: [] });
+  const [limits, setLimits]         = useState({ free: TIERS.free.limit, pro: TIERS.pro.limit, enterprise: TIERS.enterprise.limit });
+  const [blockRates, setBlockRates] = useState({ free: 0, pro: 0, enterprise: 0 });
   const [codeVisible, setCodeVisible] = useState(false);
   const [activeLine, setActiveLine]   = useState(0);
   const [running, setRunning] = useState(false);
   const holdRef    = useRef({});
   const simRef     = useRef(null);
   const blobIdRef  = useRef(0);
+
+  useEffect(() => {
+    const sync = () =>
+      fetch(`${API}/stats`)
+        .then(r => r.json())
+        .then(data => {
+          setLimits(data.tier_limits);
+          if (data.tier_stats) {
+            const newCounts = {}, newRates = {};
+            for (const tier of Object.keys(TIERS)) {
+              const ts = data.tier_stats[tier];
+              const lim = data.tier_limits[tier];
+              newCounts[tier] = ts.total % Math.max(lim, 1);
+              newRates[tier]  = ts.block_rate;
+            }
+            setCounts(newCounts);
+            setBlockRates(newRates);
+          }
+        })
+        .catch(console.error);
+    sync();
+    const id = setInterval(sync, 2000);
+    return () => clearInterval(id);
+  }, []);
 
   const spawnBlob = (tier) => {
     const id = blobIdRef.current++;
@@ -257,23 +285,26 @@ export default function Bouncer() {
     }, 650);
   };
 
-  const fireRequest = (tier) => {
+  const fireRequest = useCallback(async (tier) => {
     spawnBlob(tier);
-    setCounts(prev => {
-      const next = { ...prev, [tier]: prev[tier] + 1 };
+    try {
+      const res = await fetch(`${API}/check`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: "demo-user", tier }),
+      });
       if (codeVisible) {
-        const isOver = prev[tier] >= TIERS[tier].limit;
-        setActiveLine(isOver ? 14 : 20);
-        setTimeout(() => setActiveLine(isOver ? 16 : 23), 400);
+        const allowed = res.status !== 429;
+        setActiveLine(allowed ? 20 : 14);
+        setTimeout(() => setActiveLine(allowed ? 23 : 16), 400);
       }
-      return next;
-    });
-  };
+    } catch { /* backend unreachable — blob still plays */ }
+  }, [codeVisible]);
 
   // Hold-to-fill: fire repeatedly while mouse/touch held
   const startHold = (tier) => {
     fireRequest(tier);
-    holdRef.current[tier] = setInterval(() => fireRequest(tier), 80);
+    holdRef.current[tier] = setInterval(() => fireRequest(tier), 200);
   };
   const stopHold = (tier) => {
     clearInterval(holdRef.current[tier]);
@@ -301,7 +332,7 @@ export default function Bouncer() {
       clearInterval(simRef.current);
     }
     return () => clearInterval(simRef.current);
-  }, [running, codeVisible]);
+  }, [running, fireRequest]);
 
   // Clean up hold intervals on unmount
   useEffect(() => () => Object.values(holdRef.current).forEach(clearInterval), []);
@@ -347,12 +378,14 @@ export default function Bouncer() {
         background: "#FAFAF8",
         position: "sticky", top: 0, zIndex: 10,
       }}>
-        <button style={{
-          background: "none", border: "1.5px solid #ccc",
-          borderRadius: "50%", width: 36, height: 36,
-          cursor: "pointer", fontSize: 16,
-          display: "flex", alignItems: "center", justifyContent: "center",
-        }}>←</button>
+        <button
+          onClick={() => window.history.back()}
+          style={{
+            background: "none", border: "1.5px solid #ccc",
+            borderRadius: "50%", width: 36, height: 36,
+            cursor: "pointer", fontSize: 16,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>←</button>
 
         <div style={{ textAlign: "center" }}>
           <h1 style={{
@@ -390,6 +423,8 @@ export default function Bouncer() {
             <Bucket
               tier={tier}
               count={counts[tier]}
+              limit={limits[tier]}
+              blockRate={blockRates[tier]}
               blobs={blobs[tier]}
               onReset={() => resetTier(tier)}
             />
